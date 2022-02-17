@@ -6,6 +6,7 @@ from encoder import inference as encoder
 from encoder import inference_accent as encoder_accent
 from pathlib import Path
 from utils import logmmse
+from typing import List
 from tqdm import tqdm
 import numpy as np
 import librosa
@@ -44,7 +45,7 @@ ACCENT_DICT = {
     'TLV': [6, 27],
 }
 
-def preprocess_l2arctic(dataset_root: Path, reference_speaker: str, kaldi_dir: Path, out_dir: Path, n_processes: int,
+def preprocess_l2arctic(dataset_root: Path, test_speakers: List[str], reference_speakers: List[str], kaldi_dirs: List[Path], out_dir: Path, n_processes: int,
                            skip_existing: bool, hparams):
     input_dirs = [dataset_root]
     print("\n    ".join(map(str, ["Using data from:"] + input_dirs)))
@@ -61,10 +62,15 @@ def preprocess_l2arctic(dataset_root: Path, reference_speaker: str, kaldi_dir: P
     metadata_file = metadata_fpath.open("a" if skip_existing else "w", encoding="utf-8")
 
     # Preprocess the dataset
-    ki = KaldiInterface(wav_scp=str(kaldi_dir.joinpath('wav.scp')), bnf_scp=str(kaldi_dir.joinpath('bnf', 'feats.scp')))
-    speaker_dirs = list(chain.from_iterable(input_dir.glob("*") for input_dir in input_dirs))
-    func = partial(preprocess_speaker, out_dir=out_dir, ref_speaker_feat_interface=ki, skip_existing=skip_existing, 
-                    hparams=hparams, reference_speaker=reference_speaker)
+    ki_list = []
+    for kaldi_dir in kaldi_dirs:
+        ki = KaldiInterface(wav_scp=str(kaldi_dir.joinpath('wav.scp')), bnf_scp=str(kaldi_dir.joinpath('bnf', 'feats.scp')))
+        ki_list.append(ki)
+
+    test_speaker_dirs = [dataset_root.joinpath(test_speaker) for test_speaker in test_speakers]
+    speaker_dirs = list(chain.from_iterable(list(set(input_dir.glob("*")) - set(test_speaker_dirs)) for input_dir in input_dirs))
+    func = partial(preprocess_speaker, out_dir=out_dir, ref_speaker_feat_interfaces=ki_list, skip_existing=skip_existing, 
+                    hparams=hparams, reference_speakers=reference_speakers)
     job = Pool(n_processes).imap(func, speaker_dirs)
     for speaker_metadata in tqdm(job, "L2ARCTIC", len(speaker_dirs), unit="speakers"):
         for metadatum in speaker_metadata:
@@ -85,7 +91,7 @@ def preprocess_l2arctic(dataset_root: Path, reference_speaker: str, kaldi_dir: P
     # print("Max audio timesteps length: %d" % max(int(m[3]) for m in metadata))
 
 
-def preprocess_speaker(speaker_dir, out_dir: Path, ref_speaker_feat_interface, skip_existing: bool, hparams, reference_speaker: str):
+def preprocess_speaker(speaker_dir, out_dir: Path, ref_speaker_feat_interfaces, skip_existing: bool, hparams, reference_speakers: List[str]):
     metadata = []
     kaldi_dir = speaker_dir.joinpath('kaldi')
     ki = KaldiInterface(wav_scp=str(kaldi_dir.joinpath('wav.scp')), bnf_scp=str(kaldi_dir.joinpath('bnf', 'feats.scp')))
@@ -98,13 +104,13 @@ def preprocess_speaker(speaker_dir, out_dir: Path, ref_speaker_feat_interface, s
             wav = wav / np.abs(wav).max() * hparams.rescaling_max
         wav, _ = librosa.effects.trim(wav, top_db=25)
         wav_cat_fname = '{}-{}'.format(speaker_dir.name, wav_fpath.stem)
-
-        metadata.append(process_utterance(wav, ki, ref_speaker_feat_interface, out_dir, wav_cat_fname, skip_existing, hparams, source_speaker, reference_speaker))
+        processed_utterance = process_utterance(wav, ki, ref_speaker_feat_interfaces, out_dir, wav_cat_fname, skip_existing, hparams, source_speaker, reference_speakers)
+        metadata.extend(processed_utterance if processed_utterance is not None else [])
     return [m for m in metadata if m is not None]
 
 
-def process_utterance(wav: np.ndarray, source_speaker_feat_interface: KaldiInterface, ref_speaker_feat_interface: KaldiInterface, out_dir: Path, basename: str,
-                      skip_existing: bool, hparams, source_speaker: str, reference_speaker: str):
+def process_utterance(wav: np.ndarray, source_speaker_feat_interface: KaldiInterface, ref_speaker_feat_interfaces: List[KaldiInterface], out_dir: Path, basename: str,
+                      skip_existing: bool, hparams, source_speaker: str, reference_speakers: List[str]):
     ## FOR REFERENCE:
     # For you not to lose your head if you ever wish to change things here or implement your own
     # synthesizer.
@@ -122,7 +128,11 @@ def process_utterance(wav: np.ndarray, source_speaker_feat_interface: KaldiInter
     if utterance_id.split('_')[1][0] == 'b' and int(utterance_id.split('_')[1][1:]) > 489:
         return None
 
-    mel_fpath = out_dir.joinpath("mels", "mel-%s.npy" % basename)
+    mel_fpath_list = []
+    for reference_speaker in reference_speakers:
+        mel_fpath = out_dir.joinpath("mels", "mel-%s-%s.npy" % (basename, reference_speaker))
+        mel_fpath_list.append(mel_fpath)
+
     wav_fpath = out_dir.joinpath("audio", "audio-%s.npy" % basename)
     ppg_fpath = out_dir.joinpath("ppgs", "ppg-%s.npy" % basename)
     if skip_existing and mel_fpath.exists() and wav_fpath.exists():
@@ -142,8 +152,13 @@ def process_utterance(wav: np.ndarray, source_speaker_feat_interface: KaldiInter
     if mel_frames > hparams.max_mel_frames and hparams.clip_mels_length:
         return None
 
-    mel = ref_speaker_feat_interface.get_feature(reference_speaker.upper()+'_'+basename.split('-')[-1], 'bnf')
-    # Compute ppg
+    # Compute Target PPG
+    mel_list = []
+    for reference_speaker, ref_speaker_feat_interface in zip(reference_speakers, ref_speaker_feat_interfaces):
+        mel = ref_speaker_feat_interface.get_feature(reference_speaker.upper()+'_'+basename.split('-')[-1], 'bnf')
+        mel_list.append(mel)
+    
+    # Compute source ppg
     ppg = source_speaker_feat_interface.get_feature(source_speaker.upper()+'_'+basename.split('-')[-1], 'bnf')
     # ppg_frames = ppg.shape[0]
 
@@ -153,11 +168,12 @@ def process_utterance(wav: np.ndarray, source_speaker_feat_interface: KaldiInter
     # ppg = ppg[:min_frames, :]
 
     # Write the spectrogram, embed, ppg and audio to disk
-    np.save(mel_fpath, mel, allow_pickle=False)
+    for mel_fpath, mel in zip(mel_fpath_list, mel_list):
+        np.save(mel_fpath, mel, allow_pickle=False)
     np.save(ppg_fpath, ppg, allow_pickle=False)
 
     # Return a tuple describing this training example
-    return wav_fpath.name, mel_fpath.name, ppg_fpath.name, "embed-%s.npy" % basename, len(wav), mel_frames
+    return [(wav_fpath.name, mel_fpath.name, ppg_fpath.name, "embed-%s-%s.npy" % (basename, reference_speaker), len(wav), mel_frames) for mel_fpath, reference_speaker in zip(mel_fpath_list, reference_speakers)]
 
 
 # def embed_utterance_dvec(fpath, encoder_model_fpath, encoder_accent_model_fpath):
@@ -176,24 +192,16 @@ def process_utterance(wav: np.ndarray, source_speaker_feat_interface: KaldiInter
 #     embed = np.concatenate((embed_accent, embed_speaker))
 #     np.save(embed_fpath, embed, allow_pickle=False)
 
-def embed_utterance_dvec(fpath, encoder_model_fpath, encoder_accent_model_fpath, embedding_type):
+def embed_utterance_dvec(fpath, encoder_accent_model_fpath):
     
     # Compute the speaker embedding of the utterance
     wav_fpath, embed_fpath = fpath
     wav = np.load(wav_fpath)
     wav = encoder.preprocess_wav(wav)
 
-    embed_speaker = np.array([])
-    embed_accent = np.array([])
+    embed_accent = get_accent_embedding(encoder_accent_model_fpath, wav)
 
-    if embedding_type == "both" or embedding_type == "speaker":
-        embed_speaker = get_speaker_embedding(encoder_model_fpath, wav)
-
-    if embedding_type == "both" or embedding_type == "accent":
-        embed_accent = get_accent_embedding(encoder_accent_model_fpath, wav)
-
-    embed = np.concatenate((embed_accent, embed_speaker))
-    np.save(embed_fpath, embed, allow_pickle=False)
+    np.save(embed_fpath, embed_accent, allow_pickle=False)
 
 def get_accent_embedding(encoder_accent_model_fpath, preprocessed_wav):
     if not encoder_accent.is_loaded():
@@ -210,7 +218,7 @@ def get_speaker_embedding(encoder_model_fpath, preprocessed_wav):
     return embed_speaker
 
 
-def create_dvec_embeddings(synthesizer_root: Path, encoder_model_fpath: Path, encoder_accent_model_fpath: Path, n_processes: int, embedding_type: str):
+def create_dvec_embeddings(synthesizer_root: Path, encoder_accent_model_fpath: Path, n_processes: int):
     wav_dir = synthesizer_root.joinpath("audio")
     metadata_fpath = synthesizer_root.joinpath("train.txt")
     assert wav_dir.exists() and metadata_fpath.exists()
@@ -221,10 +229,17 @@ def create_dvec_embeddings(synthesizer_root: Path, encoder_model_fpath: Path, en
     with metadata_fpath.open("r") as metadata_file:
         metadata = [line.split("|") for line in metadata_file]
         #fpaths = [(wav_dir.joinpath(m[0]), embed_dir.joinpath(m[3])) for m in metadata]
-        fpaths = [(wav_dir.joinpath("audio-BDL-"+m[0].split("-")[-1]), embed_dir.joinpath(m[3])) for m in metadata]
+        fpaths = []
+        for m in metadata:
+            embed_path = embed_dir.joinpath(m[3])
+            target_accent = m[3].split("-")[-1].split(".")[0]
+            wav_path = wav_dir.joinpath("audio-"+target_accent+"-"+m[0].split("-")[-1])
+            fpaths.append((wav_path, embed_path))
+
+        # fpaths = [(wav_dir.joinpath("audio-BDL-"+m[0].split("-")[-1]), embed_dir.joinpath(m[3])) for m in metadata]
 
     # TODO: improve on the multiprocessing, it's terrible. Disk I/O is the bottleneck here.
     # Embed the utterances in separate threads
-    func = partial(embed_utterance_dvec, encoder_model_fpath=encoder_model_fpath, encoder_accent_model_fpath=encoder_accent_model_fpath, embedding_type=embedding_type)
+    func = partial(embed_utterance_dvec, encoder_accent_model_fpath=encoder_accent_model_fpath)
     job = Pool(n_processes).imap(func, fpaths)
     list(tqdm(job, "Embedding", len(fpaths), unit="utterances"))

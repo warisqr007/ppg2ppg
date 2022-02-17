@@ -756,7 +756,7 @@ hparams = HParams(
     # WaveNet does not support multi GPU yet, WIP)
     # Synthesis also uses the following hardware parameters for multi-GPU parallel synthesis.
     tacotron_gpu_start_idx=0,  # idx of the first GPU to be used for Tacotron training.
-    tacotron_num_gpus=1,  # Determines the number of gpus in use for Tacotron training.
+    tacotron_num_gpus=2,  # Determines the number of gpus in use for Tacotron training.
     split_on_cpu=True,
     # Determines whether to split data on CPU or on first GPU. This is automatically True when 
 	# more than 1 GPU is used.

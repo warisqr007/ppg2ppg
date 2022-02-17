@@ -14,10 +14,12 @@ if __name__ == "__main__":
     )
     parser.add_argument("dataset_root", type=Path, help=\
         "Path to L2-ARCTIC dataset.")
-    parser.add_argument("reference_speaker", type=str, help= \
-        "Reference speaker. This should correspond to the KALDI speaker")
-    parser.add_argument("kaldi_dir", type=Path, help= \
-        "Path to kaldi dir for reference speaker")
+    parser.add_argument("-ts", "--test_speakers", type=str, nargs="*", default=[], help= \
+        "Test speakers. These speakers will be excluded from the training.")
+    parser.add_argument("-ref", "--reference_speakers", type=str, nargs="*", help= \
+        "Reference speakers. This should correspond to the KALDI speakers")
+    parser.add_argument("-kaldi", "--kaldi_dirs", type=Path, nargs="*", help= \
+        "Paths to kaldi dir for reference speakers")
     parser.add_argument("-o", "--out_dir", type=Path, default=argparse.SUPPRESS, help=\
         "Path to the output directory that will contain the mel spectrograms, the audios and the "
         "embeds. Defaults to <datasets_root>/SV2TTS/translator/")
@@ -42,3 +44,6 @@ if __name__ == "__main__":
     print_args(args, parser)
     args.hparams = hparams.parse(args.hparams)
     preprocess_l2arctic(**vars(args))
+
+
+#Example: python translator_preprocess_audio.py /mnt/data1/waris/datasets/data_ppg2ppg_v2 -ts NJS YKWK ZHAA TXHC LXHC SV2TTS -ref BDL SVBI -kaldi /mnt/data1/waris/datasets/data_ppg2ppg_v2/BDL/kaldi /mnt/data1/waris/datasets/data_ppg2ppg_v2/SVBI/kaldi
