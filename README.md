@@ -26,7 +26,7 @@ This is a TensorFlow + Pytorch implementation. This implementation is adapted fr
 * Synthesizer and Translator (i.e., Seq2seq model): [ARCTIC](http://www.festvox.org/cmu_arctic/) and [L2-ARCTIC](https://psi.engr.tamu.edu/l2-arctic-corpus/). Please see [here]() for a merged version.
 * Vocoder: [LibriSpeech](https://www.openslr.org/12), see [here](https://github.com/CorentinJ/Real-Time-Voice-Cloning) for detailed training process.
 
-All the pretrained the models are available [here](https://drive.google.com/file/d/1HdHqIk3ij2h9m5NqfgWK19OJqEGAgoJv/view?usp=sharing)
+All the pretrained the models are available [here](https://drive.google.com/file/d/1RUFXQ9jVXTAgPSukUuWv0TGKGhuaQeeo/view?usp=sharing)
 
 ## Quick Start
 
