@@ -1,8 +1,10 @@
 # Zero-Shot Foreign Accent Conversion without a Native Reference
 
-Code for this paper [Zero-Shot Foreign Accent Conversion without a Native Reference](https://www.isca-speech.org/archive/interspeech_2022/quamer22_interspeech.html)
+Code for this paper [Zero-Shot Foreign Accent Conversion without a Native Reference](https://www.isca-speech.org/archive/interspeech_2022/quamer22_interspeech.html) 
 
 Waris Quamer, Anurag Das, John Levis, Evgeny Chukharev-Hudilainen, Ricardo Gutierrez-Osuna
+
+**Code not longer maintained, but you can find alternate implementation [here](https://github.com/unilight/seq2seq-vc/tree/main/egs/l2-arctic). (See Latent Space Conversion Method)
 
 This is a TensorFlow + Pytorch implementation. This implementation is adapted from the Real Time Voice Clone implementation at https://github.com/CorentinJ/Real-Time-Voice-Cloning.
 
